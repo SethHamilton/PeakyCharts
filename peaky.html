@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>Peaky Chart Scales</title>
+</head>
+
+<style>
+
+	.chartcontainer {
+		width: 80%;
+		height: 100px;
+		margin: 0 auto;
+		margin-bottom: 36px;
+	}
+
+	.tall {
+		height: 300px;
+	}
+
+	.label {
+		font-family: sans-serif;
+		font-size: 24px;
+		width: 80%;
+		margin: 0 auto;
+		margin-top: 10px;		
+	}
+
+	.note {
+		font-family: sans-serif;
+		font-size: 16px;
+		width: 80%;
+		margin: 0 auto;
+		margin-top: 10px;		
+		margin-bottom: 10px;	
+		line-height: 22px;	
+	}
+
+</style>
+
+<script>
+
+	function fixCanvas( canvas, ctx ) {
+
+		var parent = canvas.parentElement;
+
+		// the canvas is in a div, lets get the dimensions of the div
+		// we will need these to resize the canvas (at least on the first call to drawChart).
+
+		var divWidth = parent.clientWidth;
+		var divHeight = parent.clientHeight;
+
+	
+		// Although not necessary, for all those people on retina/highDPI phones, 
+		// retina macs, and now high DPI windows machines I think this is critical. 
+		//
+		// Without adjusting the number of pixels in our canvas
+		// the result will be a pixelated, grainy looing chart. 
+		// 
+		// I found a post on stackoverflow that had detection code
+		// for getting the pixel ratio of the canvas.
+		//
+		// http://stackoverflow.com/questions/18060943/html5-canvas-cannot-clear-dirty-pixels-retina-related
+		//
+		// this is an adaptation of that example. 
+
+   	  	var deviceRatio = window.devicePixelRatio || 1;
+        var backingRatio = ctx.webkitBackingStorePixelRatio || ctx.backingStorePixelRatio || 1;
+
+		// Are these some sort of retina pixel?
+    	var pixelRatio = deviceRatio / backingRatio;
+
+    	var width = Math.round( pixelRatio * divWidth );
+    	var height = Math.round( pixelRatio * divHeight );
+
+    	// if the canvas needs resizing to fill it's parent div
+    	// and account for highDPI/retina displays, then make it so.
+    	//
+    	// note: this will allow us to resize if the browsers
+    	// was resized as well. But should only resize "once"
+    	// after the initial run unless the browser is resized.
+    	if (width != canvas.width || height != canvas.height) {
+    		canvas.width = width;
+    		canvas.height = height;
+
+    		// we have to hold the visual size of the canvas to
+    		// the size of container div. All DOM/CSS is in non-retina
+    		// pixels, but the canvas will be in retina pixels (scaled)
+    		canvas.style.width = divWidth + 'px';
+    		canvas.style.height = divHeight = 'px';
+    	}
+
+	}
+
+	function drawChart( canvasId, mode, data, color, startAngle, endAngle ) {
+
+		var canvas = document.getElementById( canvasId );
+
+		if (!canvas)
+			return;	
+
+		// when getting the canvas context in newer browsers the alpha:false 
+		// allows for optimization if you will not be using transparent canvases
+		// note: the context is basically the interface for drawing!
+		var ctx = canvas.getContext("2d", {alpha:false});
+
+		// make sure the canvas is sized to our containing div and make sure
+		// we are highDPI/retina.
+		fixCanvas( canvas, ctx );
+
+		// because I'm lazy and hate dererencing
+    	var w = canvas.width;
+    	var h = canvas.height;	
+
+		// clear the canvas and fill it with a light blue
+		ctx.fillStyle = '#f0f0ff';
+		ctx.beginPath();
+		ctx.rect( 0, 0, w, h );
+		ctx.fill();
+
+		// now that we filled it, is there anything to plot? 
+		// if not, leave.
+		if (!data || !data.length)
+			return;
+
+		var spacing = w / (data.length - 1); // how wide is the spacing between nodes;
+
+		// get the top range for our chart
+		var max = 0;
+		for (var i in data)	if (data[i] > max) max = data[i];
+
+		// start drawing
+		ctx.fillStyle = color; // gumby green.
+		ctx.beginPath();
+
+		for (var i = 0; i < data.length; i++) {
+
+			// get our position from left of chart	
+			var x = Math.round(i * spacing); // snap to pixels for prettier display
+
+			if (mode == 'linear') {
+				// make a percent of height, multiply by pixel height of canvas.
+				// because we want to draw up from the bottom of the canvas
+				// we subtract the height of this node from the height of the
+				// canvas and that leaves us our position.
+				var y = h - ((data[i] / max) * h); 
+
+				if (i == 0) // if first node, we move cursor
+					ctx.moveTo( x, y );
+				else // we add a line segment
+					ctx.lineTo( x, y );
+
+			} else if (mode == 'logarithmic') {
+
+				// here we make a percent of log value over log max. We must handle
+				// zero, which is ~infinity with the inline condition "?", we will
+				// default to 0 on this condition
+				// 
+				// we also scale (double) the values to account for Log(1) which is
+				// zero, and we don't want a 1 value to be at zero.
+				var logMax = Math.log( max * 2 );
+				var logVal = (data[i]) ? Math.log(data[i] * 2) : 0;
+
+				var y = h - ((logVal / logMax) * h); 
+
+				if (i == 0) // if first node, we move cursor
+					ctx.moveTo( x, y );
+				else // we add a line segment
+					ctx.lineTo( x, y );
+
+			} else if (mode == 'arc') {
+
+
+				// note: this could be cleaned up, or consensed into a few lines
+				// but I've left it expanded to show the work.
+
+				// what we are doing is using a polar calculation that given
+				// and angle and a radius will calculate a y coordiate relative 0,0.
+
+				// we are going to do this twice on a "pretend" circle with a 100 unit
+				// radius.
+
+				// the first calc will give us the y of the start angle. This can be anything
+			    // from zero to 90.
+
+			    // the second calc will give us the y coordiate of where our data point
+			    // falls on the remaining arc between startAngle and 90 degrees.
+
+			    // by moving up or down start angle between 0 and 90 we can control
+			    // the level of exageration we see in our chart
+
+				var arcAngle, arcY, polarY, baseline, diff, angle;
+
+				arcAngle = endAngle - startAngle; // how much arc is left between start and 90
+
+				// get our baseline Y coord of the starting angle
+				angle = endAngle * (Math.PI / 180); // convert to radians			
+				topY = 100 * Math.sin(angle); // get the y coord of the starting point
+
+				// get our baseline Y coord of the starting angle
+				angle = startAngle * (Math.PI / 180); // convert to radians			
+				baseY = 100 * Math.sin(angle); // get the y coord of the starting point
+
+				// calculate our data point on the remaining arc
+				angle = (data[i] / max) * arcAngle; // create angle form % of total
+				angle = (startAngle + angle) * (Math.PI / 180); // convert to radians			
+				dataY = 100 * Math.sin(angle);
+				
+				// difference between height of working circle and Y of baseline
+				diff = topY - baseY; 
+
+				// change register of dataY by the difference to set 0 at 0.
+				dataY -= baseY;
+
+				var y = h - ((dataY / diff) * h); 
+
+				if (i == 0) // if first node, we move cursor
+					ctx.moveTo( x, y );
+				else // we add a line segment
+					ctx.lineTo( x, y );
+				
+			}
+
+
+		}
+
+		// move down to bottom right of cavas.
+		ctx.lineTo( w, h );
+		// move to bottom left
+		ctx.lineTo( 0, h);
+		// fill
+		ctx.fill();
+
+		// make a nice transparent stroke
+		ctx.strokeStyle = 'rgba(255,255,255,0.25)'; // white with 25% opacity
+		ctx.lineWidth = 1;
+
+		// draw rules
+		for (var i = 1; i < data.length-1; i++) {		
+
+			// snap to pixels for pretty display
+			// the 0.5 moves the line center to the middle of pixel
+			// otherwise it will look blury and straddle two pixels
+			var x = Math.round(i * spacing) + 0.5; 
+
+			ctx.beginPath();
+			ctx.moveTo( x, 0 ); // move past "half pixel boundry"
+			ctx.lineTo( x, h );
+			ctx.stroke();
+
+		}
+
+	}
+
+	var chartData = [12,1,5,3,6,11,99,140,160,44,32,10,3,1,2,0,5,7,66,115,160,152,82,74,12,4,0,2,14];
+
+	function drawAll() {
+
+		// draw a tall one so we can see all the data points
+		drawChart( 'fullsize', 'linear', chartData, '#888888' );	
+
+		// draw a more typical shortened one that must fit in a UI somewhere
+		drawChart( 'linearCanvas', 'linear', chartData, '#888888' );
+
+		// draw it logarithmically
+		drawChart( 'logCanvas', 'logarithmic', chartData, '#995566' );
+
+		// draw it logarithmically
+		drawChart( 'arcCanvas1', 'arc', chartData, '#00bb99', 0, 90 );
+
+		// draw it logarithmically
+		drawChart( 'arcCanvas2', 'arc', chartData, '#00bb99',45, 75 );
+
+		// draw it logarithmically
+		drawChart( 'arcCanvas3', 'arc', chartData, '#00bb99', 30, 85 );
+
+	}
+
+	// recalc and redraw the charts if the browser changes size
+	window.onresize = function () {
+		drawAll();
+	}
+
+</script>
+
+
+<body id="home" onload="drawAll();">
+
+	<div class="label">Linear Scale - 300px - visible detail on all values</div>
+	<div class="note">This tall plot is for reference and allows us to see all the data points.</div>
+	<div class="chartcontainer tall">
+		<canvas id="fullsize"/>
+	</div>
+
+	<div class="label">Linear Scale - 125px high - detail on small values lost.</div>
+	<div class="note">Each node is exactly proportional to the total. This is the most accurate representation of values, 
+		but has the effect making low value nodes disapear (appear to have no variance) when next to high value nodes.</div>
+	<div class="chartcontainer">
+		<canvas id="linearCanvas"/>
+	</div>
+
+	<div class="label">Log Scale - detail on small values hugely exagerated</div>
+	<div class="note">Each node is scaled logarithmically, this effectively scales small values in short charts so they are
+		visibile, while dampening the spikey look of the data. While useful, I've never liked that points look so far removed
+		from what is happening in the linear chart.</div>
+	<div class="chartcontainer">
+		<canvas id="logCanvas"/>
+	</div>
+
+	<div class="label">Arc Scale - nodes scaled on arc segment - 0-90 degrees</div>
+	<div class="note">Each node is scaled proportionately on an arc segment between a start angle and 90 degrees. This has the effect
+		of making lower value items appear to have a linear scale while dampening the peaks. It is similar to log scaling, but much more
+		subtle with less distortion of values. High values are flattened out, lower values are near linear.</div>	
+	<div class="chartcontainer">
+		<canvas id="arcCanvas1"/>		
+	</div>
+
+	<div class="label">Arc Scale - nodes scaled on arc segment - 45-70 degrees</div>
+	<div class="note">By changing the start and end angle we can adjust the falloff at the top, and how quickly compression in the Y axis takes
+		place.</div>	
+	<div class="chartcontainer">
+		<canvas id="arcCanvas2"/>		
+	</div>
+	<div class="label">Arc Scale - nodes scaled on arc segment - 30-85 degrees</div>
+
+	<div class="note">Another example on a wider range. Notice how the caps flatten out and the mid values have more range.</div>	
+	<div class="chartcontainer">
+		<canvas id="arcCanvas3"/>		
+	</div>
+
+
+</body>
+
+</html>
+
